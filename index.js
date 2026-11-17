@@ -190,6 +190,67 @@ async function dropProjectionCache(sessionId) {
   return { removed, bytes }
 }
 
+// ── 补扫：删完之后又冒出来的尾巴 ──────────────────────────────────────────
+//
+// 删掉一条**正开着**的会话时，客户端/宿主会把它仍在内存里的快照重新 flush 出来，
+// 于是刚删掉的投影缓存（有时连日志目录）在一两秒内又出现在原位。
+// 缓存里带着完整快照，所以这条会话还能被列出来、还能被打开——必须补扫干净。
+
+const SWEEP_DELAYS = [300, 1200, 3000, 6000, 12000]
+
+/**
+ * 扫一次：清掉重新出现的投影缓存；日志目录若被应用写回来，
+ * 搬进同一个回收站条目（`payload-reborn-<stamp>`），绝不直接抹掉用户数据。
+ */
+async function sweepDeleted(ctx, entries) {
+  let touched = false
+  for (const entry of entries) {
+    const sessionId = String(entry?.sessionId ?? '')
+    if (!sessionId) continue
+    const cache = await dropProjectionCache(sessionId)
+    if (cache.removed > 0) touched = true
+
+    const index = await indexSessionDirs()
+    const dir = index.get(sessionId)
+    if (dir && entry.entryId) {
+      const target = path.join(TRASH_ROOT, entry.entryId, `payload-reborn-${Date.now()}`)
+      try {
+        await fs.rename(dir, target)
+        touched = true
+        try {
+          ctx.logger?.warn?.(`dsh-session-delete: ${sessionId} 被重新写回，已再次移入回收站`)
+        } catch {}
+      } catch {}
+    }
+    if (cache.removed > 0 || dir) {
+      // 让列表再落一次地：客户端可能刚把这条从缓存里读了回来
+      try {
+        ctx.emit('api-session/removed', sessionId)
+      } catch {}
+    }
+  }
+  return touched
+}
+
+const sweepTimers = new Set()
+
+function scheduleSweep(ctx, entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return
+  for (const delay of SWEEP_DELAYS) {
+    const timer = setTimeout(() => {
+      sweepTimers.delete(timer)
+      void sweepDeleted(ctx, entries).catch(() => {})
+    }, delay)
+    if (typeof timer?.unref === 'function') timer.unref()
+    sweepTimers.add(timer)
+  }
+}
+
+function clearSweeps() {
+  for (const timer of sweepTimers) clearTimeout(timer)
+  sweepTimers.clear()
+}
+
 // ── 工作区记账 ────────────────────────────────────────────────────────────
 
 /**
@@ -373,7 +434,12 @@ async function deleteSessions(ctx, requested, options = {}) {
     }
   }
 
-  if (moved.length > 0) await refreshSessionList(ctx)
+  if (moved.length > 0) {
+    // 立刻补扫一次（同一秒内应用就可能把缓存写回来），再排后续几轮
+    await sweepDeleted(ctx, entries)
+    scheduleSweep(ctx, entries)
+    await refreshSessionList(ctx)
+  }
   return {
     moved,
     entries,
@@ -492,6 +558,8 @@ async function purgeTrash(entryIds) {
  */
 async function scanResidue(ctx) {
   const index = await indexSessionDirs()
+  // 只要磁盘上没有这条会话的日志目录，缓存就是孤立/过期数据——包括已进回收站的那些：
+  // 回收站里带着日志，还原时会重新生成缓存，旧的这份只会让已删的会话还能被列出来、被打开。
   const trashed = new Set((await listTrash()).map((entry) => entry.sessionId))
   const bySession = new Map()
   for (const entry of await readdirSafe(PROJCACHE_ROOT)) {
@@ -499,7 +567,7 @@ async function scanResidue(ctx) {
     const match = /^(session-[0-9a-f-]+)\.json(\.bak\..*)?$/.exec(entry.name)
     if (!match) continue
     const sessionId = match[1]
-    if (index.has(sessionId) || trashed.has(sessionId)) continue
+    if (index.has(sessionId)) continue
     const bytes = await fileBytes(path.join(PROJCACHE_ROOT, entry.name))
     const current = bySession.get(sessionId)
     if (current) {
@@ -507,7 +575,7 @@ async function scanResidue(ctx) {
       current.files.push(entry.name)
     } else {
       // 一个会话的缓存可能同时存在 .json 与 .bak.<stamp>：按会话归并成一行
-      bySession.set(sessionId, { sessionId, file: entry.name, files: [entry.name], bytes })
+      bySession.set(sessionId, { sessionId, file: entry.name, files: [entry.name], bytes, trashed: trashed.has(sessionId) })
     }
   }
   const orphans = [...bySession.values()]
@@ -612,7 +680,8 @@ export function apply(ctx) {
       const action = String(
         body.action ?? new URL(req.url ?? '/', 'http://x').searchParams.get('action') ?? 'list',
       )
-      const mutating = action === 'delete' || action === 'restore' || action === 'purge' || action === 'cleanResidue'
+      const mutating =
+        action === 'delete' || action === 'restore' || action === 'purge' || action === 'cleanResidue' || action === 'sweep'
       if (mutating && method !== 'POST') return sendJson(res, 405, { ok: false, error: 'post-required' })
 
       try {
@@ -654,6 +723,19 @@ export function apply(ctx) {
             const result = await cleanResidue(ctx, body.sessionIds)
             return sendJson(res, 200, { ok: true, ...result })
           }
+          case 'sweep': {
+            // 手动补扫：把「已删但又冒出来」的缓存/日志再清一遍（设置页与命令行都用得到）
+            const ids = Array.isArray(body.sessionIds) ? body.sessionIds.map(String) : []
+            const trash = await listTrash()
+            const entries = ids.length > 0
+              ? ids.map((sessionId) => {
+                  const hit = trash.find((entry) => entry.sessionId === sessionId)
+                  return { sessionId, entryId: hit?.entryId }
+                })
+              : trash.map((entry) => ({ sessionId: entry.sessionId, entryId: entry.entryId }))
+            const touched = await sweepDeleted(ctx, entries)
+            return sendJson(res, 200, { ok: true, swept: entries.length, touched })
+          }
           default:
             return sendJson(res, 400, { ok: false, error: `unknown-action:${action}` })
         }
@@ -667,5 +749,10 @@ export function apply(ctx) {
       () => c.webServer.register({ kind: 'exact', path: API_PATH, handler: (req, res) => void handler(req, res) }),
       'dsh-session-delete: route',
     )
+
+    // 补扫定时器随插件卸载一起清掉
+    try {
+      c.effect(() => clearSweeps, 'dsh-session-delete: sweep-timers')
+    } catch {}
   })
 }

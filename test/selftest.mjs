@@ -229,6 +229,37 @@ check('常驻但空闲的会话可以删除', r.body.moved?.length === 1, JSON.s
 check('它的日志已离开原位', !(await fs.stat(idleDir).catch(() => null)))
 check('它的缓存也一起清掉', !(await fs.stat(path.join(CACHE, 'session-dddd.json')).catch(() => null)))
 
+// 补扫：删完之后应用又把缓存/日志写回来，必须能被清掉（这就是「删了还在列表里、还能打开」的根因）
+const rebornId = 'session-eeee'
+await makeSession('--proj-b--', rebornId)
+await fs.writeFile(path.join(CACHE, `${rebornId}.json`), JSON.stringify({ version: 7, id: rebornId }))
+r = await call('delete', { sessionIds: [rebornId] })
+check('补扫用例：先正常删除', r.body.moved?.length === 1, JSON.stringify(r.body))
+const rebornEntry = r.body.entries?.[0]?.entryId
+
+// 模拟「会话还挂在内存里，flush 把日志目录与投影缓存又写了回来」
+await makeSession('--proj-b--', rebornId)
+await fs.writeFile(path.join(CACHE, `${rebornId}.json`), JSON.stringify({ version: 7, id: rebornId, reborn: true }))
+r = await call('sweep', { sessionIds: [rebornId] })
+check('补扫报告有改动', r.body.touched === true, JSON.stringify(r.body))
+check('补扫清掉重新出现的缓存', !(await fs.stat(path.join(CACHE, `${rebornId}.json`)).catch(() => null)))
+check('补扫把重新出现的日志搬回回收站', !(await fs.stat(path.join(SESSIONS, '--proj-b--', rebornId)).catch(() => null)))
+check(
+  '回收站里留下了 reborn 副本（不直接抹掉用户数据）',
+  (await fs.readdir(path.join(TRASH, rebornEntry))).some((name) => name.startsWith('payload-reborn')),
+)
+
+// 已进回收站的会话，其残留缓存也要被扫到——否则它还能从缓存里被列出来、被打开
+await fs.writeFile(path.join(CACHE, `${rebornId}.json`), JSON.stringify({ version: 7, id: rebornId }))
+const residue2 = (await call('list', {}, 'GET')).body.residue
+check(
+  '回收站会话的残留缓存也能被扫到',
+  residue2.orphans.some((o) => o.sessionId === rebornId && o.trashed === true),
+  JSON.stringify(residue2.orphans.map((o) => o.sessionId)),
+)
+r = await call('cleanResidue', {})
+check('清理残留能把它清掉', !(await fs.stat(path.join(CACHE, `${rebornId}.json`)).catch(() => null)))
+
 const failed = results.filter((x) => !x.ok)
 console.log(`\n${results.length - failed.length}/${results.length} 通过`)
 await fs.rm(SANDBOX, { recursive: true, force: true })
