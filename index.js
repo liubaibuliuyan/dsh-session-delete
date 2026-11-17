@@ -14,6 +14,7 @@
  *   - 会话日志目录按 sessionId 反查，不重写持久化后端的 cwd 编码规则。
  */
 import fs from 'node:fs/promises'
+import fsSync from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
@@ -249,6 +250,74 @@ function scheduleSweep(ctx, entries) {
 function clearSweeps() {
   for (const timer of sweepTimers) clearTimeout(timer)
   sweepTimers.clear()
+}
+
+// ── 常驻看守：删除之后的任何时刻都可能被写回来 ────────────────────────────
+//
+// 实测到的第二种复发路径（比删除时的竞态更常见）：
+//   - 5 个已删会话的缓存被应用在同一秒（16:12:57）批量写回；
+//   - 另 1 个在重启那一刻（16:31:24）被写回。
+// 也就是说「删除后补扫 12 秒」这个窗口抓不到它们。所以再加三层：
+//   ① 启动时扫一遍回收站        —— 抓住重启时被写回的那批
+//   ② 监听投影缓存目录（fs.watch）—— 任何时刻有人写已删会话的缓存就立刻清
+//   ③ 每 5 分钟兜一次全量        —— 兜住监听失效/路径后出现的情况
+const JANITOR_INTERVAL_MS = 5 * 60 * 1000
+
+const trashIds = new Set()
+let trashWatcher = null
+
+async function refreshTrashIds() {
+  try {
+    const trash = await listTrash()
+    trashIds.clear()
+    for (const entry of trash) if (entry.sessionId) trashIds.add(entry.sessionId)
+    return trash
+  } catch {
+    return []
+  }
+}
+
+async function janitorPass(ctx) {
+  const trash = await refreshTrashIds()
+  if (trash.length === 0) return
+  await sweepDeleted(ctx, trash.map((entry) => ({ sessionId: entry.sessionId, entryId: entry.entryId })))
+}
+
+/** 单一文件事件：写回来的如果属于回收站里的会话，立刻清掉。 */
+function watchCacheDir(ctx) {
+  if (trashWatcher) return
+  try {
+    trashWatcher = fsSync.watch(PROJCACHE_ROOT, (eventType, filename) => {
+      const name = typeof filename === 'string' ? filename : ''
+      const match = /^(session-[0-9a-f-]+)\.json(\.bak\..*)?$/.exec(name)
+      if (!match) return
+      const sessionId = match[1]
+      if (!trashIds.has(sessionId)) return
+      void dropProjectionCache(sessionId).catch(() => {})
+    })
+    if (typeof trashWatcher?.unref === 'function') trashWatcher.unref()
+  } catch {
+    // 目录还不存在或平台不支持：交给 5 分钟的兜底轮询
+    trashWatcher = null
+  }
+}
+
+function startJanitor(ctx) {
+  void janitorPass(ctx).then(() => watchCacheDir(ctx)).catch(() => {})
+  const timer = setInterval(() => {
+    void janitorPass(ctx).then(() => watchCacheDir(ctx)).catch(() => {})
+  }, JANITOR_INTERVAL_MS)
+  if (typeof timer?.unref === 'function') timer.unref()
+  sweepTimers.add(timer)
+}
+
+function stopJanitor() {
+  clearSweeps()
+  try {
+    trashWatcher?.close?.()
+  } catch {}
+  trashWatcher = null
+  trashIds.clear()
 }
 
 // ── 工作区记账 ────────────────────────────────────────────────────────────
@@ -669,7 +738,7 @@ function rejectRequest(ctx, req) {
   return null
 }
 
-export function apply(ctx) {
+export function apply(ctx, options) {
   ctx.inject(['webServer'], (c) => {
     const handler = async (req, res) => {
       const rejected = rejectRequest(ctx, req)
@@ -750,9 +819,12 @@ export function apply(ctx) {
       'dsh-session-delete: route',
     )
 
-    // 补扫定时器随插件卸载一起清掉
+    // 补扫定时器与看守随插件卸载一起清掉
     try {
-      c.effect(() => clearSweeps, 'dsh-session-delete: sweep-timers')
+      c.effect(() => stopJanitor, 'dsh-session-delete: janitor')
     } catch {}
+
+    // 启动即扫一遍：重启那一刻应用会把已删会话的缓存写回来，只有常驻看守能抓住
+    if (options?.janitor !== false) startJanitor(ctx)
   })
 }

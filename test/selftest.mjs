@@ -150,7 +150,8 @@ async function call(action, payload, method = 'POST') {
 
 // ── 跑测试 ────────────────────────────────────────────────────────────────
 await setup()
-await import(pathToFileURL(path.join(HERE, '..', 'index.js')).href).then((mod) => mod.apply(ctx))
+// 关掉常驻看守：测试要自己控制「什么时候补扫」，否则后台 watcher 会抢先删掉待断言的缓存
+await import(pathToFileURL(path.join(HERE, '..', 'index.js')).href).then((mod) => mod.apply(ctx, { janitor: false }))
 
 check('注册了恰好一条 HTTP 路由', routes.length === 1 && routes[0].path === '/dsh-session-delete', `path=${routes[0]?.path}`)
 
