@@ -47,14 +47,27 @@
 
 ## 安装
 
+三种方式任选，都不需要 npm：
+
 ```bash
-dsh plugin --profile desktop add @liubaibuliuyan/dsh-session-delete
+# 1. 直接从 GitHub 仓库安装（推荐）
+dsh plugin --profile desktop add github:liubaibuliuyan/dsh-session-delete
+
+# 2. 用 Release 里的 tgz
+#    https://github.com/liubaibuliuyan/dsh-session-delete/releases/latest
+dsh plugin --profile desktop add ./liubaibuliuyan-dsh-session-delete-1.0.0.tgz
+
+# 3. 克隆后按路径安装
+git clone https://github.com/liubaibuliuyan/dsh-session-delete
+dsh plugin --profile desktop add ./dsh-session-delete
 ```
 
 装完**重启 DSH Desktop**（Host 半边只在启动时加载）。侧边栏会话行的垃圾桶图标出现即成功。
 
-> 从源码本地安装（开发用）：
-> `dsh plugin --profile desktop add /path/to/dsh-session-delete`
+> 包名以仓库里的 `package.json` 为准（当前是 `@local/dsh-session-delete`），
+> 所以从 git 安装后它在 profile 里会以这个名字登记。
+>
+> 从源码本地开发安装：`dsh plugin --profile desktop add /path/to/dsh-session-delete`
 
 ## 安全边界
 
