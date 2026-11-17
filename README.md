@@ -64,9 +64,9 @@ dsh plugin --profile desktop add ./dsh-session-delete
 
 装完**重启 DSH Desktop**（Host 半边只在启动时加载）。侧边栏会话行的垃圾桶图标出现即成功。
 
-> 包名以仓库里的 `package.json` 为准（当前是 `@local/dsh-session-delete`），
-> 所以从 git 安装后它在 profile 里会以这个名字登记。
->
+包名是 `@liubaibuliuyan/dsh-session-delete`，加载行 id 是 `dsh-session-delete-trash`
+（后者刻意避开 npm 上同名插件的 entry id，两者不会互相顶掉）。
+
 > 从源码本地开发安装：`dsh plugin --profile desktop add /path/to/dsh-session-delete`
 
 ## 安全边界
