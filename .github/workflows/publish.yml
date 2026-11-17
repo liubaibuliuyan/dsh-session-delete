@@ -1,10 +1,9 @@
 name: publish
 
-# 打一个 v 开头的 tag 就发布到 npm：git tag v1.0.0 && git push --tags
-# 需要在仓库 Settings → Secrets 里配好 NPM_TOKEN（npm 的 publish token）。
+# 手动触发：发布到 npm 时用（Actions 页面点 Run workflow）。
+# 需要先在仓库 Settings → Secrets 里配好 NPM_TOKEN。
+# 不绑定 tag，是因为我们目前走 GitHub 分发（Release + git 源），不需要每次打 tag 就要求 npm 凭据。
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
 
 jobs:
