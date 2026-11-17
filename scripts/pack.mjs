@@ -105,11 +105,19 @@ if (config.bundleId) {
 }
 
 // ── 广场索引条目 ─────────────────────────────────────────────────────────
+// 图标用 GitHub 直链：不依赖 npm 是否已发布，也不用等 CDN 缓存
+const repoSlug = String(config.repository || '')
+  .replace(/^https:\/\/github\.com\//, '')
+  .replace(/\.git$/, '')
+const icon = /^[\w.-]+\/[\w.-]+$/.test(repoSlug)
+  ? `https://raw.githubusercontent.com/${repoSlug}/main/icon.svg`
+  : `https://cdn.jsdelivr.net/npm/${name}@${pkg.version}/icon.svg`
+
 const entry = {
   name,
   title: config.title || name,
   description: config.description,
-  icon: `https://cdn.jsdelivr.net/npm/${name}@${pkg.version}/icon.svg`,
+  icon,
   author: config.author,
   homepage: config.homepage,
   repository: { url: config.repository },

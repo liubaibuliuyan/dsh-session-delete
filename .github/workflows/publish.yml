@@ -1,0 +1,32 @@
+name: publish
+
+# 打一个 v 开头的 tag 就发布到 npm：git tag v1.0.0 && git push --tags
+# 需要在仓库 Settings → Secrets 里配好 NPM_TOKEN（npm 的 publish token）。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      # 先在临时 DSH_HOME 上跑一遍完整流水线，不碰真实会话数据
+      - name: 自测
+        run: node test/selftest.mjs
+
+      - name: 生成发布产物
+        run: node scripts/pack.mjs
+
+      - name: 发布到 npm
+        working-directory: dist/@liubaibuliuyan/dsh-session-delete
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
