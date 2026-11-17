@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Delete Conversation",
+    "description": "Unified delete action: moves the conversation to a recoverable trash and cleans its projection cache, workspace bookkeeping and list row in one step."
+  }
+}
