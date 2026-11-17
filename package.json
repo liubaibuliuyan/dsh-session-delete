@@ -1,5 +1,5 @@
 {
-  "name": "@local/dsh-session-delete",
+  "name": "@liubaibuliuyan/dsh-session-delete",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -19,6 +19,8 @@
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },

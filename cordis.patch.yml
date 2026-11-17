@@ -1,7 +1,8 @@
-# dsh-session-delete —— 统一的「删除对话」动作
+# 删除对话 —— 统一的会话删除动作
 #
 # 一行 Host 插件：注册 /dsh-session-delete 本地 API（删除 / 还原 / 彻底删除 / 残留清理），
 # 并由 client.js 在会话「…」菜单、会话行尾按钮和「设置」里挂上入口。
+# 加载行 id 用 -trash 后缀，避免与 npm 上的 dsh-session-delete 撞 entry id。
 - insert:
-    - id: dsh-session-delete
-      name: "@local/dsh-session-delete"
+    - id: dsh-session-delete-trash
+      name: "@liubaibuliuyan/dsh-session-delete"

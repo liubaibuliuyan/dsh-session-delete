@@ -96,13 +96,19 @@ delete publicPkg.private
 delete publicPkg.scripts
 
 fs.writeFileSync(path.join(outDir, 'package.json'), `${JSON.stringify(publicPkg, null, 2)}\n`, 'utf8')
-// bundle patch 与客户端模块 id 都要跟着改名，否则装上去是另一个身份
-rewrite('cordis.patch.yml', `"${pkg.name}"`, `"${name}"`)
-rewrite('client.js', `id: '${pkg.name}'`, `id: '${name}'`)
-// 加载行 id 也要避开 npm 上的同名插件，否则两者同装会撞 entry id
-if (config.bundleId) {
-  rewrite('cordis.patch.yml', '- id: dsh-session-delete\n', `- id: ${config.bundleId}\n`)
+
+// 源码本身就是发布身份，这里只做一致性校验：patch 行名与客户端模块 id 必须和包名一致，
+// 否则装上去会是另一个身份（改名漏一处就会静默失效）。
+const assertOnce = (rel, needle) => {
+  const text = fs.readFileSync(path.join(outDir, rel), 'utf8')
+  const count = ([text.match(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))] || []).length
+  if (count !== 1) {
+    console.error(`✗ ${rel} 里期望出现 1 次 ${JSON.stringify(needle)}，实际 ${count} 次`)
+    process.exit(1)
+  }
 }
+assertOnce('cordis.patch.yml', `name: "${name}"`)
+assertOnce('client.js', `id: '${name}'`)
 
 // ── 广场索引条目 ─────────────────────────────────────────────────────────
 // 图标用 GitHub 直链：不依赖 npm 是否已发布，也不用等 CDN 缓存

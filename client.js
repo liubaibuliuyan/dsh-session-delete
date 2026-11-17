@@ -9,7 +9,7 @@
  * 确认对话框走 frame 级浮层 (shell.overlay)，不用 window.confirm。
  */
 window.__ModuleLoader__.load({
-  id: '@local/dsh-session-delete',
+  id: '@liubaibuliuyan/dsh-session-delete',
   factory(require) {
     const React = require('react')
     const h = React.createElement
