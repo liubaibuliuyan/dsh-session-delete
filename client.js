@@ -26,6 +26,7 @@ window.__ModuleLoader__.load({
       inlineConfirm: '确认删除',
       confirmCancel: '取消',
       toastClose: '关闭提示',
+      backToNew: '已退回新对话',
       busyDeleting: '正在删除…',
       doneMoved: (n) => (n === 1 ? '已移入回收站 · 可在设置里还原' : `已移入回收站 ${n} 个对话 · 可在设置里还原`),
       failedRunning: '有对话正在运行，已跳过。',
@@ -71,6 +72,7 @@ window.__ModuleLoader__.load({
       inlineConfirm: 'Confirm delete',
       confirmCancel: 'Cancel',
       toastClose: 'Dismiss',
+      backToNew: 'back to a new conversation',
       busyDeleting: 'Deleting…',
       doneMoved: (n) => (n === 1 ? 'Moved to trash · restore anytime in Settings' : `Moved ${n} conversations to trash · restore anytime in Settings`),
       failedRunning: 'Some conversations are running and were skipped.',
@@ -192,6 +194,32 @@ window.__ModuleLoader__.load({
       const reason = failureReasonOf(error)
       if (reason === 'in-use') return true
       return /EPERM|EBUSY|EACCES|ENOTEMPTY|being used by another process/i.test(reason)
+    }
+
+    // 删除后「回到新对话页」需要两个客户端服务：uiWorkspace 负责导航，sessions 负责判断是否正开着
+    let uiWorkspaceService = null
+    let sessionsService = null
+
+    /** 这条会话是否已经在主视图里物化（= 用户正开着它）。 */
+    function isSessionOpen(sessionId) {
+      try {
+        return !!sessionsService?.binding?.(sessionId)
+      } catch {
+        return false
+      }
+    }
+
+    /**
+     * 退回主页面（新对话界面）：等价于点侧边栏的 New Session。
+     * 空白 New Session 在发出第一条消息前不落盘，所以这么做不会留下垃圾会话。
+     */
+    function returnToNewSession() {
+      try {
+        uiWorkspaceService?.startSession?.()
+        return true
+      } catch {
+        return false
+      }
     }
 
     /**
@@ -448,12 +476,18 @@ window.__ModuleLoader__.load({
         const confirm = async (event) => {
           event.preventDefault()
           event.stopPropagation()
+          const targetId = state.sessionIds?.[0]
+          // 删之前先记下：这条是不是正开着。删完要退回新对话页，
+          // 否则持久层的追加写入会把日志在原路径重建（回收站里会多一条重复）
+          const wasOpen = targetId ? isSessionOpen(targetId) : false
           setBusy(true)
           const result = await runDelete(state.sessionIds, state.cascade !== false)
           setBusy(false)
           setPending(null)
+          const wentHome = wasOpen && result.moved > 0 ? returnToNewSession() : false
           // 成功给一条两秒的确认（行会立刻消失，弹窗只是回执）；失败常驻，带原因和 ×
-          setToast({ kind: result.ok && !result.partial ? 'ok' : 'error', text: result.text })
+          const text = wentHome ? `${result.text} · ${t('backToNew')}` : result.text
+          setToast({ kind: result.ok && !result.partial ? 'ok' : 'error', text })
         }
         const cancel = (event) => {
           event.preventDefault()
@@ -869,6 +903,13 @@ window.__ModuleLoader__.load({
         })
 
         const slots = ctx.slots
+
+        // 删除后需要「回到新对话页」：uiWorkspace.startSession() 就是侧边栏的 New Session，
+        // 而 sessions.binding(id) 能看出这条会话是否已在主视图里被物化（= 正开着）。
+        try {
+          uiWorkspaceService = ctx.get('uiWorkspace') ?? null
+          sessionsService = ctx.get('sessions') ?? null
+        } catch {}
 
         // ① 会话「…」菜单：排在内置的复制会话 ID（450）之后
         slots.inject('sidebar.workspaces.session.menu.item', () =>
