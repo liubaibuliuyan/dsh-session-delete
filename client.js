@@ -196,14 +196,21 @@ window.__ModuleLoader__.load({
       return /EPERM|EBUSY|EACCES|ENOTEMPTY|being used by another process/i.test(reason)
     }
 
-    // 删除后「回到新对话页」需要两个客户端服务：uiWorkspace 负责导航，sessions 负责判断是否正开着
-    let uiWorkspaceService = null
-    let sessionsService = null
+    // 删除后「回到新对话页」需要两个客户端服务：uiWorkspace 负责导航，sessions 负责判断是否正开着。
+    // 服务可能在 apply 之后才就绪，所以不在 apply 里缓存，用到时再取。
+    let clientCtx = null
+    function clientService(key) {
+      try {
+        return clientCtx?.get?.(key) ?? null
+      } catch {
+        return null
+      }
+    }
 
     /** 这条会话是否已经在主视图里物化（= 用户正开着它）。 */
     function isSessionOpen(sessionId) {
       try {
-        return !!sessionsService?.binding?.(sessionId)
+        return !!clientService('sessions')?.binding?.(sessionId)
       } catch {
         return false
       }
@@ -215,7 +222,9 @@ window.__ModuleLoader__.load({
      */
     function returnToNewSession() {
       try {
-        uiWorkspaceService?.startSession?.()
+        const uiWorkspace = clientService('uiWorkspace')
+        if (typeof uiWorkspace?.startSession !== 'function') return false
+        uiWorkspace.startSession()
         return true
       } catch {
         return false
@@ -905,11 +914,8 @@ window.__ModuleLoader__.load({
         const slots = ctx.slots
 
         // 删除后需要「回到新对话页」：uiWorkspace.startSession() 就是侧边栏的 New Session，
-        // 而 sessions.binding(id) 能看出这条会话是否已在主视图里被物化（= 正开着）。
-        try {
-          uiWorkspaceService = ctx.get('uiWorkspace') ?? null
-          sessionsService = ctx.get('sessions') ?? null
-        } catch {}
+        // 而 sessions.binding(id) 能看出这条会话是否已在主视图里被物化（= 正开着）
+        clientCtx = ctx
 
         // ① 会话「…」菜单：排在内置的复制会话 ID（450）之后
         slots.inject('sidebar.workspaces.session.menu.item', () =>
