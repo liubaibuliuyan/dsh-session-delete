@@ -219,12 +219,16 @@ window.__ModuleLoader__.load({
     /**
      * 退回主页面（新对话界面）：等价于点侧边栏的 New Session。
      * 空白 New Session 在发出第一条消息前不落盘，所以这么做不会留下垃圾会话。
+     *
+     * 必须显式传工作区：startSession() 的默认顺序是「显式选中 → 当前会话所属 → 最近活跃」，
+     * 而我们刚把会话从工作区里拆掉，第二步必然落空，会退到“最近活跃的工作区”去。
      */
-    function returnToNewSession() {
+    function returnToNewSession(workspaceId) {
       try {
         const uiWorkspace = clientService('uiWorkspace')
         if (typeof uiWorkspace?.startSession !== 'function') return false
-        uiWorkspace.startSession()
+        if (workspaceId) uiWorkspace.startSession(workspaceId)
+        else uiWorkspace.startSession()
         return true
       } catch {
         return false
@@ -264,7 +268,10 @@ window.__ModuleLoader__.load({
         return { ok: false, text }
       }
       const failedNote = failed.length > 0 ? ` ${t('failedOther', failed.length)}` : ''
-      return { ok: true, moved, partial: failed.length > 0, text: `${t('doneMoved', moved)}${failedNote}` }
+      // 取被删（根）会话原本的工作区：Host 在拆记账之前记下了它
+      const entries = Array.isArray(data.entries) ? data.entries : []
+      const workspaceId = entries.find((entry) => entry?.workspaceId)?.workspaceId ?? null
+      return { ok: true, moved, partial: failed.length > 0, text: `${t('doneMoved', moved)}${failedNote}`, workspaceId }
     }
 
     // ── 结果提示：右下角小弹窗。成功自动消失，失败常驻并带 × 关闭 ────────
@@ -493,7 +500,7 @@ window.__ModuleLoader__.load({
           const result = await runDelete(state.sessionIds, state.cascade !== false)
           setBusy(false)
           setPending(null)
-          const wentHome = wasOpen && result.moved > 0 ? returnToNewSession() : false
+          const wentHome = wasOpen && result.moved > 0 ? returnToNewSession(result.workspaceId) : false
           // 成功给一条两秒的确认（行会立刻消失，弹窗只是回执）；失败常驻，带原因和 ×
           const text = wentHome ? `${result.text} · ${t('backToNew')}` : result.text
           setToast({ kind: result.ok && !result.partial ? 'ok' : 'error', text })

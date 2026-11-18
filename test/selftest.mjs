@@ -161,6 +161,12 @@ openTurns.add('session-ccc')
 let r = await call('delete', { sessionIds: ['session-aaa', 'session-ccc'] })
 if (r.body.moved === undefined) console.log('  debug delete response:', JSON.stringify(r))
 check('级联：父会话 + 子会话一起删除', r.body.moved?.length === 2 && r.body.cascade?.length === 1, `moved=${r.body.moved}`)
+// 删除响应要带回原工作区：前端据此把「退回新对话」落在用户当时所在的工作区
+check(
+  '响应带回原工作区 id',
+  r.body.entries?.some((e) => e.sessionId === 'session-aaa' && e.workspaceId === 'ws-1'),
+  JSON.stringify(r.body.entries?.map((e) => ({ id: e.sessionId, ws: e.workspaceId }))),
+)
 check('运行中的会话被拒绝', r.body.failed?.some((f) => f.sessionId === 'session-ccc' && f.reason === 'running'), JSON.stringify(r.body.failed))
 check('日志目录已离开原位置', !(await fs.stat(path.join(SESSIONS, '--proj-a--', 'session-aaa')).catch(() => null)))
 check('子会话日志也已离开', !(await fs.stat(path.join(SESSIONS, '--proj-a--', 'session-bbb')).catch(() => null)))

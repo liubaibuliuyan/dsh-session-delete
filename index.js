@@ -328,11 +328,16 @@ function stopJanitor() {
  */
 async function dropBookkeeping(ctx, sessionId) {
   const registry = ctx.get('workspaceRegistry')
-  if (!registry) return { detached: 0 }
+  if (!registry) return { detached: 0, workspaceIds: [] }
   let detached = 0
+  const workspaceIds = []
   if (typeof registry.list === 'function') {
     for (const workspace of registry.list()) {
       if (!workspace?.sessionIds?.includes(sessionId)) continue
+      // 记下它原本属于哪个工作区：拆账之后这个信息就没了，
+      // 而「删除后退回新对话」必须回到用户当时所在的那个工作区
+      const workspaceId = String(workspace?.id ?? '')
+      if (workspaceId) workspaceIds.push(workspaceId)
       try {
         await workspace.detachSession(sessionId)
         detached += 1
@@ -345,7 +350,7 @@ async function dropBookkeeping(ctx, sessionId) {
       await registry[method](sessionId)
     } catch {}
   }
-  return { detached }
+  return { detached, workspaceIds }
 }
 
 // ── 回收站 ────────────────────────────────────────────────────────────────
@@ -489,11 +494,15 @@ async function deleteSessions(ctx, requested, options = {}) {
       moved.push(target.id)
       entries.push({ sessionId: target.id, entryId })
       const cache = await dropProjectionCache(target.id)
-      await dropBookkeeping(ctx, target.id)
+      const bookkeeping = await dropBookkeeping(ctx, target.id)
       try {
         ctx.emit('api-session/removed', target.id)
       } catch {}
-      entries[entries.length - 1].cache = cache
+      const entry = entries[entries.length - 1]
+      entry.cache = cache
+      // 前端据此把「退回新对话」落到用户当时所在的工作区，而不是最近活跃的那个
+      entry.workspaceId = bookkeeping.workspaceIds[0] ?? null
+      entry.workspaceIds = bookkeeping.workspaceIds
     } catch (error) {
       const reason = moveFailureReason(error)
       failures.push({ sessionId: target.id, reason })
