@@ -1,6 +1,6 @@
 {
   "name": "@liubaibuliuyan/dsh-session-delete",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "Delete conversations in DeepSeek Harness in one step: the session log moves to a restorable trash while its projection cache, workspace bookkeeping and front-end list are cleaned in the same call.",
