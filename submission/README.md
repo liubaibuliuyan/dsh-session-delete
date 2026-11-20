@@ -1,8 +1,9 @@
-# 投稿文件（待提 PR）
+# 投稿文件（已提交）
 
-这里放的是提交给 [`awesome-dsh-plugin`](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 的
-条目文件。DSH 插件广场（`realguan/dsh-plugin-market`）的条目数据来自那个列表，索引每天
-03:17 UTC 自动重建，所以**进列表是出现在广场里的第一步**。
+> **状态：PR 已开** → https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/17080
+>
+> DSH 插件广场（`realguan/dsh-plugin-market`）的条目数据来自这个列表，索引每天
+> 03:17 UTC 自动重建，所以**进列表是出现在广场里的第一步**。
 
 ## 怎么提交
 
