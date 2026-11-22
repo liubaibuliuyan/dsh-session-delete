@@ -7,7 +7,12 @@
   "repository": "https://github.com/liubaibuliuyan/dsh-session-delete",
   "homepage": "https://github.com/liubaibuliuyan/dsh-session-delete",
   "category": "session",
-  "labels": ["fs-write", "fs-read", "env", "host-runtime"],
+  "labels": [
+    "fs-write",
+    "fs-read",
+    "env",
+    "host-runtime"
+  ],
   "keywords": [
     "dsh-plugin",
     "dsh",
@@ -19,7 +24,7 @@
     "cleanup",
     "conversation"
   ],
-  "enginesDsh": ">=0.2.1-rc.1 <0.3.0-0 || >=0.2.2-rc.1 <0.3.0-0 || >=0.2.3-rc.1 <0.3.0-0",
+  "enginesDsh": ">=0.2.1-0 <0.3.0-0 || >=0.2.2-0 <0.3.0-0 || >=0.2.3-0 <0.3.0-0 || >=0.2.4-0 <0.3.0-0 || >=0.2.5-0 <0.3.0-0 || >=0.2.6-0 <0.3.0-0 || >=0.2.7-0 <0.3.0-0 || >=0.2.8-0 <0.3.0-0 || >=0.2.9-0 <0.3.0-0",
   "description": {
     "en": "Delete conversations in DeepSeek Harness in one step. DSH only archives sessions — this plugin performs the whole delete atomically: the session log moves to a restorable trash under ~/.dsh/.trash/session-delete, its projection cache file is removed, and workspace bookkeeping (attached session, archive set, pin set) is cleaned through the public API, then api-session/removed is emitted so the sidebar list drops the row without a restart. Derived sub-sessions cascade via header.parentSession. Refuses only when a turn is actually running (agents.turnBoundaryOf), not merely open; retries on Windows file-in-use errors. Restore from Settings → Delete Conversation. Touches nothing but the sessions and trash directories.",
     "zh": "给 DeepSeek Harness 补上「删除对话」。DSH 只有归档、没有删除——这个插件一步把整件事做完：会话日志目录搬进 ~/.dsh/.trash/session-delete 的可还原回收站，投影缓存文件同步删除，工作区记账（挂载的会话、归档集合、置顶集合）通过公开 API 拆干净，再补发 api-session/removed 让侧边栏列表立刻消失、无需重启。派生子会话按 header.parentSession 级联。只有真的有一轮在跑时才拒绝（agents.turnBoundaryOf），仅仅是「打开着」不算运行中；Windows 上文件被占用会自动退避重试。可在设置 → 删除对话里还原。只动 sessions 与回收站两处目录，工作目录里的文件不受影响。"
