@@ -236,6 +236,70 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 删除时顺手清掉这条会话在前端留下的痕迹。
+     *
+     * DSH 的界面把一部分状态存进浏览器的 Local Storage，其中 `dsh.sessions.current`
+     * 记录着“当前开着哪条会话”。Host 端删完日志、发过 api-session/removed 之后，
+     * 这个指针若不一起清，前端仍会认为那条会话存在 —— 于是它在列表里挂着，点开报
+     * “找不到日志目录”。删除就该一次清干净，而不是事后巡逻。
+     */
+    function clearClientTraces(sessionIds) {
+      const gone = new Set((Array.isArray(sessionIds) ? sessionIds : []).map(String).filter(Boolean))
+      if (gone.size === 0) return 0
+      let cleared = 0
+      let storage = null
+      try {
+        storage = typeof localStorage !== 'undefined' ? localStorage : null
+      } catch {
+        storage = null
+      }
+      if (!storage) return 0
+
+      const touchedKeys = []
+      try {
+        for (let i = 0; i < storage.length; i += 1) {
+          const key = storage.key(i)
+          if (!key) continue
+          // 会话专属键：dsh.conversation.session-<id> / dsh.sidebar-right.v1.session-<id> 等，
+          // 以及把 id 记在值里的全局键。
+          for (const id of gone) {
+            if (key.includes(id)) {
+              touchedKeys.push(key)
+              break
+            }
+          }
+        }
+      } catch {}
+
+      for (const key of touchedKeys) {
+        try {
+          storage.removeItem(key)
+          cleared += 1
+        } catch {}
+      }
+
+      // 「当前会话」指针：指向已删会话就直接摘掉键，让界面回到“没有选中会话”。
+      for (const key of ['dsh.sessions.current']) {
+        try {
+          const raw = storage.getItem(key)
+          if (!raw) continue
+          let pointsToGone = false
+          for (const id of gone) {
+            if (raw.includes(id)) {
+              pointsToGone = true
+              break
+            }
+          }
+          if (pointsToGone) {
+            storage.removeItem(key)
+            cleared += 1
+          }
+        } catch {}
+      }
+      return cleared
+    }
+
+    /**
      * 执行一次删除（行内确认与菜单共用）。
      * 瞬时占用自动退避重试；无论成败都返回一句可以直接显示的话。
      */
@@ -271,7 +335,20 @@ window.__ModuleLoader__.load({
       // 取被删（根）会话原本的工作区：Host 在拆记账之前记下了它
       const entries = Array.isArray(data.entries) ? data.entries : []
       const workspaceId = entries.find((entry) => entry?.workspaceId)?.workspaceId ?? null
-      return { ok: true, moved, partial: failed.length > 0, text: `${t('doneMoved', moved)}${failedNote}`, workspaceId }
+      // 删除的同一步里清掉前端痕迹（含「当前会话」指针），这才是“一次删干净”
+      const movedIds = Array.isArray(data.moved) ? data.moved : []
+      let traces = 0
+      try {
+        traces = clearClientTraces(movedIds)
+      } catch {}
+      return {
+        ok: true,
+        moved,
+        partial: failed.length > 0,
+        text: `${t('doneMoved', moved)}${failedNote}`,
+        workspaceId,
+        clearedTraces: traces,
+      }
     }
 
     // ── 结果提示：右下角小弹窗。成功自动消失，失败常驻并带 × 关闭 ────────

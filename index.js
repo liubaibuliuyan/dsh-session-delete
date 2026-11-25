@@ -283,6 +283,61 @@ async function janitorPass(ctx) {
   await sweepDeleted(ctx, trash.map((entry) => ({ sessionId: entry.sessionId, entryId: entry.entryId })))
 }
 
+/**
+ * 清理「宿主列表里还挂着、但日志目录已经不存在」的会话项。
+ *
+ * 这是「删了还在列表里、点开报找不到日志」的第二类残留：磁盘已经干净，只是逻辑全集里还有它。
+ * 判据取 sessionQuery.listSessions() 与磁盘目录的差集，再排除两种情况，绝不误伤：
+ *   ① 回收站里的会话——那是用户主动删的，还原时还要用；
+ *   ② 有活 Agent 的会话——正在跑的空会话可能还没落盘。
+ * 命中后补发 api-session/removed，让前端列表把它丢掉。
+ */
+async function sweepGhostSessions(ctx) {
+  const query = ctx.get('sessionQuery')
+  if (!query || typeof query.listSessions !== 'function') return 0
+  let records
+  try {
+    records = await query.listSessions()
+  } catch {
+    return 0
+  }
+  if (!Array.isArray(records) || records.length === 0) return 0
+
+  const onDisk = await indexSessionDirs()
+  const trashed = new Set()
+  for (const entry of await listTrash()) if (entry.sessionId) trashed.add(entry.sessionId)
+  const live = liveSessionIds(ctx)
+
+  let ghosts = 0
+  for (const record of records) {
+    const id = String(record?.header?.id ?? '')
+    if (!id) continue
+    // 日志还在 → 正常会话，不碰
+    if (onDisk.has(id)) continue
+    // 回收站里 → 用户主动删的，还原时还要用
+    if (trashed.has(id)) continue
+    // 还在跑 → 空会话可能尚未落盘
+    if (live.has(id)) continue
+    ghosts += 1
+    try {
+      ctx.emit('api-session/removed', id)
+      ctx.logger?.warn?.(`dsh-session-delete: ${id} 日志已不存在，已从列表摘除`)
+    } catch {}
+    try {
+      await dropBookkeeping(ctx, id)
+    } catch {}
+    try {
+      await dropProjectionCache(id)
+    } catch {}
+  }
+  if (ghosts > 0) {
+    try {
+      await refreshSessionList(ctx)
+    } catch {}
+  }
+  return ghosts
+}
+
 /** 单一文件事件：写回来的如果属于回收站里的会话，立刻清掉。 */
 function watchCacheDir(ctx) {
   if (trashWatcher) return
@@ -812,7 +867,9 @@ export function apply(ctx, options) {
                 })
               : trash.map((entry) => ({ sessionId: entry.sessionId, entryId: entry.entryId }))
             const touched = await sweepDeleted(ctx, entries)
-            return sendJson(res, 200, { ok: true, swept: entries.length, touched })
+            // 顺带摘掉「日志已不存在、但逻辑全集里还挂着」的会话项（历史遗留用兜底）
+            const ghosts = await sweepGhostSessions(ctx)
+            return sendJson(res, 200, { ok: true, swept: entries.length, touched, ghosts })
           }
           default:
             return sendJson(res, 400, { ok: false, error: `unknown-action:${action}` })
